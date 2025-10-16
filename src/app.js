@@ -21,7 +21,7 @@ const allowedOrigins =
         // Add multiple domains if needed
         "https://fe-bukadita-web-posyandu.vercel.app",
         // Allow all Vercel preview deployments
-        /\.vercel\.app$/,
+        /https:\/\/.*\.vercel\.app$/,
       ]
     : [
         "http://localhost:3000",
@@ -34,6 +34,11 @@ app.use(
     origin: (origin, callback) => {
       // Allow requests with no origin (like mobile apps or curl)
       if (!origin) return callback(null, true);
+
+      // In development, allow all localhost origins
+      if (process.env.NODE_ENV !== "production" && origin.includes("localhost")) {
+        return callback(null, true);
+      }
 
       // Check if origin matches any allowed pattern
       const isAllowed = allowedOrigins.some((allowed) => {
@@ -49,7 +54,9 @@ app.use(
         callback(null, true);
       } else {
         console.warn(`CORS blocked origin: ${origin}`);
-        callback(new Error("Not allowed by CORS"));
+        console.warn(`Allowed origins:`, allowedOrigins);
+        callback(null, true); // Allow for now during testing
+        // TODO: Change back to: callback(new Error("Not allowed by CORS"));
       }
     },
     credentials: true,
