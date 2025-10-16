@@ -20,6 +20,8 @@ const allowedOrigins =
         process.env.FRONTEND_URL || "https://your-frontend-domain.vercel.app",
         // Add multiple domains if needed
         "https://fe-bukadita-web-posyandu.vercel.app",
+        // Allow all Vercel preview deployments
+        /\.vercel\.app$/,
       ]
     : [
         "http://localhost:3000",
@@ -33,7 +35,17 @@ app.use(
       // Allow requests with no origin (like mobile apps or curl)
       if (!origin) return callback(null, true);
 
-      if (allowedOrigins.includes(origin)) {
+      // Check if origin matches any allowed pattern
+      const isAllowed = allowedOrigins.some((allowed) => {
+        if (typeof allowed === "string") {
+          return origin === allowed;
+        } else if (allowed instanceof RegExp) {
+          return allowed.test(origin);
+        }
+        return false;
+      });
+
+      if (isAllowed) {
         callback(null, true);
       } else {
         console.warn(`CORS blocked origin: ${origin}`);
