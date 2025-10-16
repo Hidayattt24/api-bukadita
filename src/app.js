@@ -19,7 +19,7 @@ const allowedOrigins =
     ? [
         process.env.FRONTEND_URL || "https://your-frontend-domain.vercel.app",
         // Add multiple domains if needed
-        "https://fe-bukadita-web-posyandu.vercel.app",
+        "web-bukadita.vercel.app",
         // Allow all Vercel preview deployments
         /https:\/\/.*\.vercel\.app$/,
       ]
