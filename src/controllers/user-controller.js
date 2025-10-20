@@ -5,25 +5,31 @@ const path = require("path");
 
 // Validation schema for updating own profile
 const updateOwnProfileSchema = Joi.object({
-  full_name: Joi.string().trim().min(2).max(100).optional(),
+  full_name: Joi.string().trim().min(2).max(100).optional().messages({
+    "string.min": "Full name must be at least 2 characters long",
+    "string.max": "Full name must not exceed 100 characters",
+  }),
   phone: Joi.string()
     .trim()
-    .pattern(/^($|(\+62[8-9][\d]{8,11})|(0[8-9][\d]{8,11}))$/)
+    .pattern(/^(\+62[8-9][\d]{8,11}|0[8-9][\d]{8,11})$/)
+    .required()
     .messages({
       "string.pattern.base":
-        "Phone must start with 08 (or +62) dan 10-13 digit. Contoh: 081234567890",
-    })
-    .optional(),
-  email: Joi.string().trim().email().optional(),
+        "Phone must start with 08 or +628 and be 10-13 digits. Example: 081234567890",
+      "any.required": "Phone number is required",
+    }),
+  email: Joi.string().trim().email().optional().allow("", null).messages({
+    "string.email": "Email format is invalid",
+  }),
   address: Joi.string().trim().max(500).allow("", null).optional(),
   profil_url: Joi.string().trim().uri().allow("", null).optional(),
   date_of_birth: Joi.date().iso().max("now").allow(null).optional().messages({
-    "date.max": "Tanggal lahir tidak boleh lebih dari hari ini",
+    "date.max": "Date of birth cannot be in the future",
   }),
 })
   .min(1)
   .messages({
-    "object.min": "Minimal satu field diubah",
+    "object.min": "At least one field must be updated",
   });
 
 // GET /api/pengguna/profile - get own profile

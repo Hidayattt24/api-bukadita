@@ -81,3 +81,5 @@ build/
 # Temporary files
 *.tmp
 *.temp
+
+dummy_data/

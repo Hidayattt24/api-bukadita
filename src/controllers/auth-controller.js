@@ -21,18 +21,43 @@ const profileSchema = Joi.object({
 });
 
 const registerSchema = Joi.object({
-  email: Joi.string().email().required(),
-  password: Joi.string().min(6).required(),
-  full_name: Joi.string().trim().min(2).max(100).required(),
   phone: Joi.string()
     .trim()
     .pattern(/^(\+62[8-9][\d]{8,11}|0[8-9][\d]{8,11})$/)
-    .optional(),
+    .required()
+    .messages({
+      "string.pattern.base":
+        "Phone number must start with 08 or +628 and be 10-13 digits long (e.g., 08123456789)",
+      "any.required": "Phone number is required",
+    }),
+  password: Joi.string().min(6).required().messages({
+    "string.min": "Password must be at least 6 characters long",
+    "any.required": "Password is required",
+  }),
+  full_name: Joi.string().trim().min(2).max(100).required().messages({
+    "string.min": "Full name must be at least 2 characters long",
+    "string.max": "Full name must not exceed 100 characters",
+    "any.required": "Full name is required",
+  }),
+  email: Joi.string().email().optional().messages({
+    "string.email": "Email format is invalid",
+  }),
 });
 
 const loginSchema = Joi.object({
-  email: Joi.string().email().required(),
-  password: Joi.string().min(6).required(),
+  phone: Joi.string()
+    .trim()
+    .pattern(/^(\+62[8-9][\d]{8,11}|0[8-9][\d]{8,11})$/)
+    .required()
+    .messages({
+      "string.pattern.base":
+        "Phone number must start with 08 or +628 and be 10-13 digits long (e.g., 08123456789)",
+      "any.required": "Phone number is required",
+    }),
+  password: Joi.string().min(6).required().messages({
+    "string.min": "Password must be at least 6 characters long",
+    "any.required": "Password is required",
+  }),
 });
 
 // Utility: detect missing 'role' column error from PostgREST/Supabase
@@ -238,7 +263,7 @@ const createOrUpdateProfile = async (req, res) => {
   }
 };
 
-// POST /api/v1/auth/register - Register with email & password
+// POST /api/v1/auth/register - Register with phone & password
 const register = async (req, res) => {
   try {
     const { error: validationError, value } = registerSchema.validate(req.body);
@@ -251,25 +276,60 @@ const register = async (req, res) => {
       );
     }
 
-    const { email, password, full_name, phone } = value;
+    const { phone, password, full_name, email } = value;
 
-    // Email format validation (redundant but explicit)
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return failure(res, "AUTH_INVALID_EMAIL", "Invalid email format", 400);
+    // Normalize phone number (remove spaces, ensure format)
+    const normalizedPhone = phone.replace(/\s+/g, "").trim();
+
+    console.log("Attempting to register user:", {
+      phone: normalizedPhone,
+      full_name,
+      email,
+    });
+
+    // Check if phone number already exists in profiles
+    const { data: existingProfile, error: checkError } = await supabaseAdmin
+      .from("profiles")
+      .select("id, phone")
+      .eq("phone", normalizedPhone)
+      .maybeSingle();
+
+    if (checkError && checkError.code !== "PGRST116") {
+      console.error("Error checking existing phone:", checkError);
+      return failure(
+        res,
+        "AUTH_PHONE_CHECK_ERROR",
+        "Failed to check phone number",
+        500,
+        { details: checkError.message }
+      );
     }
 
-    console.log("Attempting to register user:", { email, full_name, phone });
+    if (existingProfile) {
+      return failure(
+        res,
+        "AUTH_PHONE_ALREADY_EXISTS",
+        "Phone number already registered",
+        400
+      );
+    }
 
-    // Register user with Supabase Auth
+    // Generate email if not provided (dummy email from phone)
+    // Format: {phone}@bukadita.local
+    const finalEmail =
+      email || `${normalizedPhone.replace("+", "")}@bukadita.local`;
+
+    console.log("Using email for registration:", finalEmail);
+
+    // Register user with Supabase Auth using email
     const { data: authData, error: authError } = await supabaseAnon.auth.signUp(
       {
-        email,
+        email: finalEmail,
         password,
         options: {
           data: {
             full_name: full_name || null,
-            phone: phone || null,
+            phone: normalizedPhone,
           },
         },
       }
@@ -277,6 +337,17 @@ const register = async (req, res) => {
 
     if (authError) {
       console.error("Registration error:", authError);
+
+      // Check if error is due to email already exists
+      if (authError.message?.includes("already registered")) {
+        return failure(
+          res,
+          "AUTH_EMAIL_ALREADY_EXISTS",
+          "Email or phone number already registered",
+          400
+        );
+      }
+
       return failure(
         res,
         "AUTH_REGISTER_ERROR",
@@ -290,6 +361,7 @@ const register = async (req, res) => {
       user: authData.user?.id,
       session: !!authData.session,
       user_metadata: authData.user?.user_metadata,
+      phone: normalizedPhone,
     });
 
     if (authData.user && authData.session) {
@@ -297,18 +369,37 @@ const register = async (req, res) => {
         "User created with immediate session (email confirmation disabled)"
       );
 
-      // Attempt to fetch profile (trigger insertion race)
+      // Create profile immediately with phone as primary identifier
       let profileData = null;
       try {
-        const { data, error } = await supabaseAnon
-          .from("profiles")
-          .select("*")
-          .eq("id", authData.user.id)
-          .maybeSingle();
-        if (!error) profileData = data || null;
+        const profilePayload = {
+          id: authData.user.id,
+          full_name,
+          phone: normalizedPhone,
+          email: finalEmail,
+          role: "pengguna",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+
+        const { data: createdProfile, error: profileError } =
+          await supabaseAdmin
+            .from("profiles")
+            .insert(profilePayload)
+            .select("*")
+            .maybeSingle();
+
+        if (profileError) {
+          console.error("Profile creation error:", profileError);
+          // If profile creation fails, still return success but indicate profile pending
+          profileData = null;
+        } else {
+          profileData = createdProfile;
+          console.log("Profile created successfully:", profileData);
+        }
       } catch (e) {
         console.warn(
-          "Profile fetch right after signup failed (ignored):",
+          "Profile creation right after signup failed (ignored):",
           e?.message
         );
       }
@@ -364,7 +455,7 @@ const register = async (req, res) => {
   }
 };
 
-// POST /api/v1/auth/login - Login with email & password
+// POST /api/v1/auth/login - Login with phone & password
 const login = async (req, res) => {
   try {
     const { error, value } = loginSchema.validate(req.body);
@@ -377,11 +468,40 @@ const login = async (req, res) => {
       );
     }
 
-    const { email, password } = value;
+    const { phone, password } = value;
 
+    // Normalize phone number
+    const normalizedPhone = phone.replace(/\s+/g, "").trim();
+
+    console.log("Login attempt with phone:", normalizedPhone);
+
+    // Step 1: Find user by phone number in profiles table
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from("profiles")
+      .select("id, email, phone, full_name, role")
+      .eq("phone", normalizedPhone)
+      .maybeSingle();
+
+    if (profileError || !profile) {
+      console.error("Profile lookup error:", profileError);
+      return failure(
+        res,
+        "AUTH_LOGIN_INVALID_CREDENTIALS",
+        "Invalid phone number or password",
+        401
+      );
+    }
+
+    console.log("Profile found:", {
+      id: profile.id,
+      email: profile.email,
+      phone: profile.phone,
+    });
+
+    // Step 2: Use email from profile to login to Supabase Auth
     const { data: authData, error: authError } =
       await supabaseAnon.auth.signInWithPassword({
-        email,
+        email: profile.email,
         password,
       });
 
@@ -391,7 +511,7 @@ const login = async (req, res) => {
         return failure(
           res,
           "AUTH_LOGIN_INVALID_CREDENTIALS",
-          "Invalid email or password",
+          "Invalid phone number or password",
           401
         );
       }
@@ -406,75 +526,10 @@ const login = async (req, res) => {
       return failure(res, "AUTH_LOGIN_ERROR", "Failed to login", 500);
     }
 
-    // Fetch profile with authenticated client first (RLS owner)
-    let profileData = null;
-    let rlsBlocked = false;
-    try {
-      const accessToken = authData.session?.access_token;
-      if (accessToken) {
-        const userClient = createClient(
-          process.env.SUPABASE_URL,
-          process.env.SUPABASE_ANON_KEY,
-          {
-            global: { headers: { Authorization: `Bearer ${accessToken}` } },
-            auth: { autoRefreshToken: false, persistSession: false },
-          }
-        );
-        const { data: ownProfile, error: ownErr } = await userClient
-          .from("profiles")
-          .select("*")
-          .eq("id", authData.user.id)
-          .maybeSingle();
-        if (ownErr) {
-          rlsBlocked = true;
-          console.info(
-            "[LOGIN] profile fetch via authenticated client failed, fallback to admin:",
-            ownErr.message
-          );
-        } else if (ownProfile) {
-          console.info("[LOGIN] profile fetched via authenticated client");
-          profileData = ownProfile;
-        }
-      }
-    } catch (e) {
-      console.warn(
-        "[LOGIN] authenticated client profile fetch threw:",
-        e?.message
-      );
-    }
+    // Use the profile data we already fetched (no need to fetch again)
+    const profileData = profile;
 
-    if (!profileData) {
-      const { data: adminProfile, error: adminErr } = await supabaseAdmin
-        .from("profiles")
-        .select("*")
-        .eq("id", authData.user.id)
-        .maybeSingle();
-      if (!adminErr && adminProfile) {
-        console.info("[LOGIN] profile fetched via service role (fallback)");
-        profileData = adminProfile;
-      }
-    }
-
-    if (!profileData) {
-      return success(
-        res,
-        "AUTH_LOGIN_PROFILE_PENDING",
-        "Profile belum tersedia, silakan coba lagi sebentar",
-        {
-          access_token: authData.session.access_token,
-          refresh_token: authData.session.refresh_token,
-          expires_at: authData.session.expires_at,
-          user: {
-            id: authData.user.id,
-            email: authData.user.email,
-            last_sign_in_at: authData.user.last_sign_in_at,
-            profile: null,
-          },
-          hints: { possible_rls_issue: rlsBlocked || undefined },
-        },
-        202
-      );
-    }
+    console.log("Login successful for user:", authData.user.id);
 
     return success(res, "AUTH_LOGIN_SUCCESS", "Login successful", {
       access_token: authData.session.access_token,
@@ -483,6 +538,7 @@ const login = async (req, res) => {
       user: {
         id: authData.user.id,
         email: authData.user.email,
+        phone: profileData.phone, // Include phone in response
         last_sign_in_at: authData.user.last_sign_in_at,
         profile: profileData,
       },
