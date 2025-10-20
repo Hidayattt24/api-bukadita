@@ -1,4 +1,4 @@
-const { supabase, supabaseAdmin } = require("../lib/SupabaseClient");
+const { supabaseAnon, supabaseAdmin } = require("../lib/SupabaseClient");
 const { paginate } = require("../utils/paginate");
 const Joi = require("joi");
 const { success, failure } = require("../utils/respond");
@@ -100,7 +100,7 @@ const updateUserSchema = Joi.object({
 const getAllUsers = async (req, res) => {
   try {
     const { page = 1, limit = 10, role: requestedRole, search } = req.query;
-    const client = supabaseAdmin || req.authenticatedClient || supabase;
+    const client = supabaseAdmin || req.authenticatedClient || supabaseAnon;
 
     const callerRole =
       req.user?.profile?.role || req.profile?.role || "pengguna";
@@ -495,7 +495,7 @@ const getUserById = async (req, res) => {
     const { id } = req.params;
 
     // Get user profile
-    const client = supabaseAdmin || req.authenticatedClient || supabase;
+    const client = supabaseAdmin || req.authenticatedClient || supabaseAnon;
     const { data: profileData, error: profileError } = await client
       .from("profiles")
       .select("*")
@@ -574,7 +574,7 @@ const updateUser = async (req, res) => {
     console.log("Admin user:", req.user.id, req.user.profile?.role);
 
     // Use service role for admin updates
-    const client = supabaseAdmin || req.authenticatedClient || supabase;
+    const client = supabaseAdmin || req.authenticatedClient || supabaseAnon;
 
     // Check if user exists
     const { data: existingUser, error: fetchError } = await client
@@ -663,7 +663,7 @@ const deleteUser = async (req, res) => {
     }
 
     // Check if user exists
-    const client = supabaseAdmin || req.authenticatedClient || supabase;
+    const client = supabaseAdmin || req.authenticatedClient || supabaseAnon;
     const { data: existingUser, error: fetchError } = await client
       .from("profiles")
       .select("id")
@@ -749,7 +749,7 @@ const deleteUser = async (req, res) => {
 // GET /api/admin/dashboard/stats - Get dashboard statistics (admin only)
 const getDashboardStats = async (req, res) => {
   try {
-    const client = req.authenticatedClient || supabase;
+    const client = supabaseAdmin || req.authenticatedClient || supabaseAnon;
     const stats = {};
 
     // Collect counts sequentially (can optimize later with Promise.all)
@@ -810,7 +810,7 @@ const getDashboardStats = async (req, res) => {
 const getAllQuizResults = async (req, res) => {
   try {
     const { page = 1, limit = 10, quiz_id, user_id } = req.query;
-    const client = req.authenticatedClient || supabase;
+    const client = supabaseAdmin || req.authenticatedClient || supabaseAnon;
 
     let query = client
       .from("quiz_results")
@@ -889,7 +889,7 @@ const updateUserRole = async (req, res) => {
       );
     }
 
-    const client = supabaseAdmin || req.authenticatedClient || supabase;
+    const client = supabaseAdmin || req.authenticatedClient || supabaseAnon;
     const { data: existingUser, error: fetchError } = await client
       .from("profiles")
       .select("id, role")
