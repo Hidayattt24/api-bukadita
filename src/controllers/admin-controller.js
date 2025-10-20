@@ -758,11 +758,12 @@ const getDashboardStats = async (req, res) => {
       .select("role", { count: "exact" });
     if (rolesErr) console.warn("[ADMIN] user stats warn:", rolesErr.message);
 
-    const totalUsers = roles?.length || 0;
+    // Guard against undefined roles to avoid TypeError on .length
+    const roleList = Array.isArray(roles) ? roles : [];
     stats.users = {
-      total: totalUsers,
-      admin: roles?.filter((r) => r.role === "admin").length || 0,
-      regular: roles?.filter((r) => r.role === "pengguna").length || 0,
+      total: roleList.length,
+      admin: roleList.filter((r) => r.role === "admin").length,
+      regular: roleList.filter((r) => r.role === "pengguna").length,
     };
 
     const { count: materialsCount } = await client
